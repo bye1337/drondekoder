@@ -116,7 +116,7 @@ class ObjectMatcher:
     
     def detect_objects(self, image: np.ndarray) -> List[ObjectDescriptor]:
         """
-        Детектирует объекты на изображении
+        Детектирует объекты на изображении методом сегментации
         
         Args:
             image: Изображение (BGR)
@@ -130,13 +130,15 @@ class ObjectMatcher:
         # Конвертируем BGR в RGB для YOLO
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        # Детектируем объекты
+        # Пробуем детекцию объектов
         results = self.yolo_model(image_rgb, 
                                  conf=self.confidence_threshold,
                                  verbose=False)
         
         objects = []
-        if len(results) > 0 and results[0].boxes is not None:
+        
+        # Если YOLO нашел COCO объекты (люди, машины и т.д.)
+        if len(results) > 0 and results[0].boxes is not None and len(results[0].boxes) > 0:
             boxes = results[0].boxes
             for i in range(len(boxes)):
                 # Получаем координаты
@@ -162,6 +164,10 @@ class ObjectMatcher:
                     embedding=patch_features,
                     image_patch=patch
                 ))
+        
+        # Если YOLO не нашел COCO объектов, создаем дескрипторы на основе сегментации по областям
+        if len(objects) == 0:
+            objects = self._segment_and_extract_features(image)
         
         return objects
     
@@ -222,6 +228,62 @@ class ObjectMatcher:
         
         return features
     
+    def _segment_and_extract_features(self, image: np.ndarray) -> List[ObjectDescriptor]:
+        """
+        Сегментирует изображение на области и извлекает признаки для каждой области
+        Используется когда YOLO не находит COCO объекты (например, на спутниковых картах)
+        
+        Args:
+            image: Изображение для сегментации
+            
+        Returns:
+            Список дескрипторов областей
+        """
+        objects = []
+        h, w = image.shape[:2]
+        
+        # Сегментируем изображение на сетку из областей
+        # Для маленького изображения используем меньшую сетку
+        if w < 500:
+            grid_size_x, grid_size_y = 4, 4
+        elif w < 1500:
+            grid_size_x, grid_size_y = 8, 8
+        else:
+            grid_size_x, grid_size_y = 12, 12
+        
+        cell_w = w // grid_size_x
+        cell_h = h // grid_size_y
+        
+        # Создаем дескриптор для каждой ячейки сетки
+        for y in range(grid_size_y):
+            for x in range(grid_size_x):
+                x1 = x * cell_w
+                y1 = y * cell_h
+                x2 = min((x + 1) * cell_w, w)
+                y2 = min((y + 1) * cell_h, h)
+                
+                # Извлекаем патч
+                patch = image[y1:y2, x1:x2]
+                if patch.size == 0:
+                    continue
+                
+                # Извлекаем признаки
+                patch_features = self._extract_visual_features(patch)
+                
+                # Создаем уникальный class_id для каждой позиции в сетке
+                # Это позволит избежать ложных совпадений между разными областями
+                class_id = y * grid_size_x + x
+                
+                objects.append(ObjectDescriptor(
+                    bbox=(x1, y1, x2, y2),
+                    class_id=class_id,
+                    confidence=1.0,  # Все области имеют одинаковую уверенность при сеточной сегментации
+                    embedding=patch_features,
+                    image_patch=patch
+                ))
+        
+        return objects
+    
     def find_location(self, large_map: np.ndarray, small_image: np.ndarray,
                      search_step: int = 500, top_k: int = 5) -> Optional[Dict]:
         """
@@ -244,8 +306,7 @@ class ObjectMatcher:
         
         if len(small_objects) == 0:
             print("⚠ Объекты на малом изображении не найдены")
-            print("🔄 Используем резервный ORB метод...")
-            return self._find_location_fallback(large_map, small_image)
+            return None
         
         print(f"✓ Найдено {len(small_objects)} объектов на малом изображении")
         
@@ -255,30 +316,9 @@ class ObjectMatcher:
         
         # Определяем стратегию поиска в зависимости от размера карты
         if map_w > 5000 or map_h > 5000:
-            result = self._search_in_large_map(large_map, small_objects, small_h, small_w, search_step)
+            return self._search_in_large_map(large_map, small_objects, small_h, small_w, search_step)
         else:
-            result = self._search_small_map(large_map, small_objects, small_h, small_w, top_k)
-        
-        # Если YOLO не сработал, пробуем ORB
-        if result is None:
-            print("⚠ YOLO не нашел совпадений")
-            print("🔄 Используем резервный ORB метод...")
-            return self._find_location_fallback(large_map, small_image)
-        
-        return result
-    
-    def _find_location_fallback(self, large_map: np.ndarray, small_image: np.ndarray) -> Optional[Dict]:
-        """
-        Резервный метод поиска с использованием ORB
-        Используется когда YOLO не находит объекты
-        """
-        try:
-            from image_matcher import ImageMatcher
-            orb_matcher = ImageMatcher()
-            return orb_matcher.find_location(large_map, small_image)
-        except Exception as e:
-            print(f"❌ Ошибка ORB метода: {e}")
-            return None
+            return self._search_small_map(large_map, small_objects, small_h, small_w, top_k)
     
     def _search_small_map(self, large_map: np.ndarray, small_objects: List[ObjectDescriptor],
                          small_h: int, small_w: int, top_k: int) -> Optional[Dict]:
@@ -390,6 +430,7 @@ class ObjectMatcher:
                            top_k: int) -> List:
         """
         Находит совпадения объектов между малым и большим изображением
+        Использует косинусное расстояние между векторными признаками
         
         Returns:
             Список кортежей (small_obj, large_obj, distance)
@@ -398,17 +439,22 @@ class ObjectMatcher:
         
         for small_obj in small_objects:
             for large_obj in large_objects:
-                # Проверяем совпадение класса
-                if small_obj.class_id != large_obj.class_id:
-                    continue
-                
+                # Вычисляем косинусное расстояние между признаками
                 distance = small_obj.distance(large_obj)
                 matches.append((small_obj, large_obj, distance))
         
         # Сортируем по расстоянию и берем топ-k
+        # Берем наиболее близкие по признакам
         matches.sort(key=lambda x: x[2])
         
-        return matches[:top_k] if top_k > 0 else matches[:10]
+        # Возвращаем только хорошие совпадения (близкие по признакам)
+        good_matches = [m for m in matches if m[2] < 0.3]  # Порог косинусного расстояния
+        
+        if len(good_matches) > 0:
+            return good_matches[:top_k] if top_k > 0 else good_matches[:10]
+        else:
+            # Если хороших совпадений нет, возвращаем лучшие из всех
+            return matches[:top_k] if top_k > 0 else matches[:10]
     
     def _estimate_position(self, matches: List, map_shape: Tuple[int, int],
                           small_h: int, small_w: int) -> Optional[Dict]:
@@ -435,13 +481,9 @@ class ObjectMatcher:
         center_x = sum(large_obj.center[0] * w for _, large_obj, w in zip(matches, [m[1] for m in matches], weights)) / total_weight
         center_y = sum(large_obj.center[1] * w for _, large_obj, w in zip(matches, [m[1] for m in matches], weights)) / total_weight
         
-        # Смещаем с учетом размера малого изображения
-        center_x = center_x - small_w // 2
-        center_y = center_y - small_h // 2
-        
         # Ограничиваем границами карты
-        center_x = max(small_w // 2, min(map_shape[1] - small_w // 2, center_x))
-        center_y = max(small_h // 2, min(map_shape[0] - small_h // 2, center_y))
+        center_x = max(0, min(map_shape[1], center_x))
+        center_y = max(0, min(map_shape[0], center_y))
         
         # Вычисляем уверенность
         avg_distance = sum(distances) / len(distances)
