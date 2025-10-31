@@ -9,18 +9,11 @@ import io
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-from image_matcher import ImageMatcher
 from route_monitor import RouteMonitor
 from video_processor import VideoProcessor
 
-# Пробуем импортировать ML систему
-try:
-    from object_matcher import ObjectMatcher
-    OBJECT_MATCHER_AVAILABLE = True
-except ImportError:
-    OBJECT_MATCHER_AVAILABLE = False
-    ObjectMatcher = None
-    print("ML система недоступна. Используется традиционный метод.")
+# Импортируем ML систему на базе YOLOv8
+from object_matcher import ObjectMatcher
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)
@@ -33,25 +26,14 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max для бол�
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Глобальные объекты
-# Используем ML систему если доступна, иначе традиционный метод
-if OBJECT_MATCHER_AVAILABLE:
-    try:
-        # Создаем ObjectMatcher - если PyTorch не установлен, он вернет False при поиске
-        matcher = ObjectMatcher(model_size='n', confidence_threshold=0.25)
-        if matcher.yolo_available:
-            print("✓ ML система загружена (ObjectMatcher на YOLOv8)")
-        else:
-            print("⚠ ML библиотеки недоступны. Переключение на ORB метод.")
-            matcher = ImageMatcher()
-            print("✓ Используется традиционный ORB метод")
-    except Exception as e:
-        print(f"⚠ Ошибка инициализации ML: {e}")
-        matcher = ImageMatcher()
-        print("✓ Используется традиционный ORB метод")
-else:
-    matcher = ImageMatcher()
-    print("✓ Используется традиционный ORB метод")
+# Глобальные объекты - используем только YOLOv8 для детекции объектов
+try:
+    matcher = ObjectMatcher(model_size='n', confidence_threshold=0.25)
+    print("✓ ML система загружена (ObjectMatcher на YOLOv8)")
+except Exception as e:
+    print(f"❌ Ошибка инициализации ML системы: {e}")
+    print("Установите зависимости: pip install ultralytics torch torchvision")
+    raise
 
 route_monitor = RouteMonitor()
 video_processor = VideoProcessor(matcher, route_monitor)

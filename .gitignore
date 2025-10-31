@@ -31,4 +31,7 @@ temp/
 *.png
 *.bmp
 *.tiff
+yolov8*.pt
+*.pid
+app.log
 
