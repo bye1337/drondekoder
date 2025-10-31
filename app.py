@@ -13,6 +13,15 @@ from image_matcher import ImageMatcher
 from route_monitor import RouteMonitor
 from video_processor import VideoProcessor
 
+# Пробуем импортировать ML систему
+try:
+    from object_matcher import ObjectMatcher
+    OBJECT_MATCHER_AVAILABLE = True
+except ImportError:
+    OBJECT_MATCHER_AVAILABLE = False
+    ObjectMatcher = None
+    print("ML система недоступна. Используется традиционный метод.")
+
 app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)
 
@@ -20,12 +29,30 @@ CORS(app)
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp', 'tiff'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max для больших карт
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Глобальные объекты
-matcher = ImageMatcher()
+# Используем ML систему если доступна, иначе традиционный метод
+if OBJECT_MATCHER_AVAILABLE:
+    try:
+        # Создаем ObjectMatcher - если PyTorch не установлен, он вернет False при поиске
+        matcher = ObjectMatcher(model_size='n', confidence_threshold=0.25)
+        if matcher.yolo_available:
+            print("✓ ML система загружена (ObjectMatcher на YOLOv8)")
+        else:
+            print("⚠ ML библиотеки недоступны. Переключение на ORB метод.")
+            matcher = ImageMatcher()
+            print("✓ Используется традиционный ORB метод")
+    except Exception as e:
+        print(f"⚠ Ошибка инициализации ML: {e}")
+        matcher = ImageMatcher()
+        print("✓ Используется традиционный ORB метод")
+else:
+    matcher = ImageMatcher()
+    print("✓ Используется традиционный ORB метод")
+
 route_monitor = RouteMonitor()
 video_processor = VideoProcessor(matcher, route_monitor)
 
