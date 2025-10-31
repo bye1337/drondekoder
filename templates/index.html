@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дрон Навигационная Система</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 Система Навигации Дрона</h1>
+            <p class="subtitle">Компьютерное зрение без GPS</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Левая панель: Управление -->
+            <div class="control-panel">
+                <section class="panel-section">
+                    <h2>📷 Загрузка Карты</h2>
+                    <div class="upload-area" id="map-upload-area">
+                        <input type="file" id="map-file" accept="image/*" style="display: none;">
+                        <label for="map-file" class="upload-btn">
+                            <span>Выбрать карту</span>
+                        </label>
+                        <div id="map-status" class="status-text"></div>
+                    </div>
+                </section>
+
+                <section class="panel-section">
+                    <h2>🚁 Загрузка Изображения Дрона</h2>
+                    <div class="upload-area" id="drone-upload-area">
+                        <input type="file" id="drone-file" accept="image/*" style="display: none;">
+                        <label for="drone-file" class="upload-btn">
+                            <span>Выбрать фото дрона</span>
+                        </label>
+                        <div id="drone-status" class="status-text"></div>
+                    </div>
+                    <button id="find-location-btn" class="action-btn" disabled>
+                        Определить местоположение
+                    </button>
+                </section>
+
+                <section class="panel-section">
+                    <h2>🗺️ Планирование Маршрута</h2>
+                    <div class="route-controls">
+                        <button id="clear-route-btn" class="action-btn secondary">Очистить маршрут</button>
+                        <label>
+                            Разрешенное отклонение (пиксели):
+                            <input type="number" id="deviation-threshold" value="50" min="10" max="500">
+                        </label>
+                    </div>
+                    <div class="info-box">
+                        <p><strong>Инструкция:</strong></p>
+                        <p>Нажмите на карту, чтобы добавить точки маршрута</p>
+                        <p>Минимум 2 точки для создания маршрута</p>
+                    </div>
+                </section>
+
+                <section class="panel-section">
+                    <h2>📊 Статус</h2>
+                    <div id="status-info" class="status-info">
+                        <div class="status-item">
+                            <span class="label">Карта:</span>
+                            <span id="map-loaded-status" class="value">Не загружена</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Позиция:</span>
+                            <span id="position-status" class="value">Не определена</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Маршрут:</span>
+                            <span id="route-status" class="value">Не задан</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Отклонение:</span>
+                            <span id="deviation-status" class="value">-</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Правая панель: Карта -->
+            <div class="map-panel">
+                <h2>Карта</h2>
+                <div id="map-container" class="map-container">
+                    <canvas id="map-canvas"></canvas>
+                    <div id="map-placeholder" class="map-placeholder">
+                        <p>Загрузите карту для начала работы</p>
+                    </div>
+                </div>
+                <div id="location-info" class="location-info" style="display: none;">
+                    <h3>Информация о местоположении</h3>
+                    <div id="location-details"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+
