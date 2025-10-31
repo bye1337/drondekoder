@@ -243,10 +243,11 @@ class ObjectMatcher:
         small_objects = self.detect_objects(small_image)
         
         if len(small_objects) == 0:
-            print("Объекты на малом изображении не найдены")
-            return None
+            print("⚠ Объекты на малом изображении не найдены")
+            print("🔄 Используем резервный ORB метод...")
+            return self._find_location_fallback(large_map, small_image)
         
-        print(f"Найдено {len(small_objects)} объектов на малом изображении")
+        print(f"✓ Найдено {len(small_objects)} объектов на малом изображении")
         
         # Для больших карт сканируем по частям
         map_h, map_w = large_map.shape[:2]
@@ -254,9 +255,30 @@ class ObjectMatcher:
         
         # Определяем стратегию поиска в зависимости от размера карты
         if map_w > 5000 or map_h > 5000:
-            return self._search_in_large_map(large_map, small_objects, small_h, small_w, search_step)
+            result = self._search_in_large_map(large_map, small_objects, small_h, small_w, search_step)
         else:
-            return self._search_small_map(large_map, small_objects, small_h, small_w, top_k)
+            result = self._search_small_map(large_map, small_objects, small_h, small_w, top_k)
+        
+        # Если YOLO не сработал, пробуем ORB
+        if result is None:
+            print("⚠ YOLO не нашел совпадений")
+            print("🔄 Используем резервный ORB метод...")
+            return self._find_location_fallback(large_map, small_image)
+        
+        return result
+    
+    def _find_location_fallback(self, large_map: np.ndarray, small_image: np.ndarray) -> Optional[Dict]:
+        """
+        Резервный метод поиска с использованием ORB
+        Используется когда YOLO не находит объекты
+        """
+        try:
+            from image_matcher import ImageMatcher
+            orb_matcher = ImageMatcher()
+            return orb_matcher.find_location(large_map, small_image)
+        except Exception as e:
+            print(f"❌ Ошибка ORB метода: {e}")
+            return None
     
     def _search_small_map(self, large_map: np.ndarray, small_objects: List[ObjectDescriptor],
                          small_h: int, small_w: int, top_k: int) -> Optional[Dict]:
