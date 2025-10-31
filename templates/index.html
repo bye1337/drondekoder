@@ -28,8 +28,18 @@
                 </section>
 
                 <section class="panel-section">
-                    <h2>🚁 Загрузка Изображения Дрона</h2>
-                    <div class="upload-area" id="drone-upload-area">
+                    <h2>🚁 Обработка Видео</h2>
+                    <div class="video-controls">
+                        <button id="start-video-btn" class="action-btn" disabled>
+                            📹 Начать видеопоток
+                        </button>
+                        <button id="stop-video-btn" class="action-btn secondary" disabled>
+                            ⏹️ Остановить поток
+                        </button>
+                        <video id="video-stream" autoplay style="display: none; width: 100%; max-height: 200px; border-radius: 8px; margin-top: 10px;"></video>
+                    </div>
+                    <div class="upload-area" id="drone-upload-area" style="margin-top: 15px;">
+                        <h3 style="margin-bottom: 10px; font-size: 1em;">Или загрузить изображение:</h3>
                         <input type="file" id="drone-file" accept="image/*" style="display: none;">
                         <label for="drone-file" class="upload-btn">
                             <span>Выбрать фото дрона</span>

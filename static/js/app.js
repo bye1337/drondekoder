@@ -5,7 +5,10 @@ let state = {
     mapContext: null,
     waypoints: [],
     currentPosition: null,
-    routeSet: false
+    routeSet: false,
+    videoStream: null,
+    videoProcessing: false,
+    processingInterval: null
 };
 
 // Инициализация
@@ -19,10 +22,14 @@ function initializeApp() {
     const droneFileInput = document.getElementById('drone-file');
     const findLocationBtn = document.getElementById('find-location-btn');
     const clearRouteBtn = document.getElementById('clear-route-btn');
+    const startVideoBtn = document.getElementById('start-video-btn');
+    const stopVideoBtn = document.getElementById('stop-video-btn');
+    const videoStream = document.getElementById('video-stream');
     const mapCanvas = document.getElementById('map-canvas');
     
     state.mapCanvas = mapCanvas;
     state.mapContext = mapCanvas.getContext('2d');
+    state.videoStream = videoStream;
     
     // Обработчики событий
     mapFileInput.addEventListener('change', handleMapUpload);
@@ -32,6 +39,8 @@ function initializeApp() {
     });
     findLocationBtn.addEventListener('click', handleFindLocation);
     clearRouteBtn.addEventListener('click', clearRoute);
+    startVideoBtn.addEventListener('click', startVideoProcessing);
+    stopVideoBtn.addEventListener('click', stopVideoProcessing);
     
     // Обработчик клика на карте для добавления точек маршрута
     mapCanvas.addEventListener('click', handleMapClick);
@@ -391,6 +400,136 @@ function updateStatus(elementId, message, type = 'info') {
         element.style.color = '#666';
     }
 }
+
+// Функции для обработки видео
+async function startVideoProcessing() {
+    if (!state.mapImage) {
+        alert('Сначала загрузите карту');
+        return;
+    }
+    
+    try {
+        // Запрашиваем доступ к веб-камере
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { width: 1280, height: 720 } 
+        });
+        
+        state.videoStream.srcObject = stream;
+        state.videoStream.style.display = 'block';
+        state.videoProcessing = true;
+        
+        // Обновляем кнопки
+        document.getElementById('start-video-btn').disabled = true;
+        document.getElementById('stop-video-btn').disabled = false;
+        
+        // Начинаем обработку кадров
+        processVideoFrames();
+        
+        updateStatus('drone-status', 'Видеопоток запущен');
+    } catch (error) {
+        console.error('Ошибка доступа к камере:', error);
+        alert('Не удалось получить доступ к веб-камере. Проверьте разрешения.');
+    }
+}
+
+function stopVideoProcessing() {
+    if (state.videoStream && state.videoStream.srcObject) {
+        const tracks = state.videoStream.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+        state.videoStream.srcObject = null;
+        state.videoStream.style.display = 'none';
+    }
+    
+    if (state.processingInterval) {
+        clearInterval(state.processingInterval);
+        state.processingInterval = null;
+    }
+    
+    state.videoProcessing = false;
+    
+    // Обновляем кнопки
+    document.getElementById('start-video-btn').disabled = false;
+    document.getElementById('stop-video-btn').disabled = true;
+    
+    updateStatus('drone-status', 'Видеопоток остановлен');
+}
+
+function processVideoFrames() {
+    if (!state.videoProcessing) return;
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = state.videoStream.videoWidth || 640;
+    canvas.height = state.videoStream.videoHeight || 480;
+    
+    function captureAndProcess() {
+        if (!state.videoProcessing || !state.videoStream.videoWidth) {
+            return;
+        }
+        
+        try {
+            ctx.drawImage(state.videoStream, 0, 0, canvas.width, canvas.height);
+            
+            // Конвертируем кадр в base64
+            canvas.toBlob(async (blob) => {
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    const base64data = reader.result;
+                    
+                    try {
+                        const response = await fetch('/api/process_video_frame', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                frame: base64data
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success && data.position) {
+                            const pos = data.position;
+                            state.currentPosition = { x: pos.x, y: pos.y };
+                            
+                            // Обновляем карту
+                            drawMap();
+                            drawRoute();
+                            drawCurrentPosition(pos.x, pos.y);
+                            
+                            // Обновляем информацию
+                            if (data.deviation) {
+                                handleDeviation(data.deviation);
+                            }
+                            
+                            updateSystemStatus();
+                        }
+                    } catch (error) {
+                        console.error('Ошибка обработки кадра:', error);
+                    }
+                };
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.8);
+            
+        } catch (error) {
+            console.error('Ошибка захвата кадра:', error);
+        }
+    }
+    
+    // Обрабатываем кадры каждые 500мс (2 FPS для обработки)
+    state.processingInterval = setInterval(captureAndProcess, 500);
+}
+
+// Обновляем доступность кнопки видео при загрузке карты
+const originalHandleMapUpload = handleMapUpload;
+handleMapUpload = async function(event) {
+    await originalHandleMapUpload(event);
+    const startVideoBtn = document.getElementById('start-video-btn');
+    if (state.mapImage) {
+        startVideoBtn.disabled = false;
+    }
+};
 
 // Периодическое обновление статуса
 setInterval(updateSystemStatus, 2000);
