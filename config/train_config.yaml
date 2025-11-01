@@ -1,0 +1,43 @@
+# Training Configuration for Drone Visual Positioning
+
+# Paths
+paths:
+  data_dir: "data/processed"
+  model_save_dir: "models/checkpoints"
+  log_dir: "logs"
+
+# Model Configuration
+model:
+  name: "triplet_resnet50"
+  backbone: "resnet50"
+  feature_dim: 128
+  pretrained: true
+  input_size: [512, 512]
+
+# Training Configuration
+training:
+  use_triplet: true  # Использовать triplet loss
+  batch_size: 32
+  num_epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  num_workers: 4
+  save_interval: 10
+  
+  # Loss configuration
+  loss:
+    type: "triplet"  # "triplet" or "contrastive"
+    margin: 1.0
+  
+  # Optimizer configuration
+  optimizer:
+    type: "adam"  # "adam" or "sgd"
+    momentum: 0.9
+  
+  # Scheduler configuration
+  scheduler:
+    type: "cosine"  # "cosine" or "step"
+    eta_min: 0.00001
+    step_size: 30
+    gamma: 0.1
+

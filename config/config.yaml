@@ -1,0 +1,48 @@
+# Configuration file for Drone Visual Positioning System
+
+# Model Configuration
+model:
+  name: "siamese_resnet50"
+  input_size: [512, 512]  # Width, Height
+  feature_dim: 128
+  backbone: "resnet50"
+  pretrained: true
+  
+# Training Configuration
+training:
+  batch_size: 32
+  num_epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  optimizer: "adam"
+  scheduler: "cosine"
+  warmup_epochs: 5
+  
+# Data Configuration
+data:
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+  augmentations:
+    rotation: 15
+    scale: 0.9
+    brightness: 0.2
+    contrast: 0.2
+    noise: 0.05
+    
+# Route Tracking
+route:
+  max_deviation: 50  # meters
+  check_interval: 2  # seconds
+  
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+
+# Logging
+logging:
+  level: "INFO"
+  save_dir: "logs/"
+
