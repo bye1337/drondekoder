@@ -3,111 +3,473 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Дрон Навигационная Система</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>Система стабилизации позиции БАС</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .status-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .status-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        
+        .status-card .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .status-card .label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            background: #667eea;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        button.danger {
+            background: #e74c3c;
+        }
+        
+        button.danger:hover {
+            background: #c0392b;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            min-height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #videoCanvas {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .log {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-left: 3px solid #667eea;
+            padding-left: 10px;
+        }
+        
+        .log-entry.error {
+            border-left-color: #e74c3c;
+            color: #e74c3c;
+        }
+        
+        .log-entry.success {
+            border-left-color: #27ae60;
+            color: #27ae60;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>🎯 Система Навигации Дрона</h1>
-            <p class="subtitle">Компьютерное зрение без GPS</p>
-        </header>
-
-        <div class="main-content">
-            <!-- Левая панель: Управление -->
-            <div class="control-panel">
-                <section class="panel-section">
-                    <h2>📷 Загрузка Карты</h2>
-                    <div class="upload-area" id="map-upload-area">
-                        <input type="file" id="map-file" accept="image/*" style="display: none;">
-                        <label for="map-file" class="upload-btn">
-                            <span>Выбрать карту</span>
-                        </label>
-                        <div id="map-status" class="status-text"></div>
-                    </div>
-                </section>
-
-                <section class="panel-section">
-                    <h2>🚁 Обработка Видео</h2>
-                    <div class="video-controls">
-                        <button id="start-video-btn" class="action-btn" disabled>
-                            📹 Начать видеопоток
-                        </button>
-                        <button id="stop-video-btn" class="action-btn secondary" disabled>
-                            ⏹️ Остановить поток
-                        </button>
-                        <video id="video-stream" autoplay style="display: none; width: 100%; max-height: 200px; border-radius: 8px; margin-top: 10px;"></video>
-                    </div>
-                    <div class="upload-area" id="drone-upload-area" style="margin-top: 15px;">
-                        <h3 style="margin-bottom: 10px; font-size: 1em;">Или загрузить изображение:</h3>
-                        <input type="file" id="drone-file" accept="image/*" style="display: none;">
-                        <label for="drone-file" class="upload-btn">
-                            <span>Выбрать фото дрона</span>
-                        </label>
-                        <div id="drone-status" class="status-text"></div>
-                    </div>
-                    <button id="find-location-btn" class="action-btn" disabled>
-                        Определить местоположение
-                    </button>
-                </section>
-
-                <section class="panel-section">
-                    <h2>🗺️ Планирование Маршрута</h2>
-                    <div class="route-controls">
-                        <button id="clear-route-btn" class="action-btn secondary">Очистить маршрут</button>
-                        <label>
-                            Разрешенное отклонение (пиксели):
-                            <input type="number" id="deviation-threshold" value="50" min="10" max="500">
-                        </label>
-                    </div>
-                    <div class="info-box">
-                        <p><strong>Инструкция:</strong></p>
-                        <p>Нажмите на карту, чтобы добавить точки маршрута</p>
-                        <p>Минимум 2 точки для создания маршрута</p>
-                    </div>
-                </section>
-
-                <section class="panel-section">
-                    <h2>📊 Статус</h2>
-                    <div id="status-info" class="status-info">
-                        <div class="status-item">
-                            <span class="label">Карта:</span>
-                            <span id="map-loaded-status" class="value">Не загружена</span>
-                        </div>
-                        <div class="status-item">
-                            <span class="label">Позиция:</span>
-                            <span id="position-status" class="value">Не определена</span>
-                        </div>
-                        <div class="status-item">
-                            <span class="label">Маршрут:</span>
-                            <span id="route-status" class="value">Не задан</span>
-                        </div>
-                        <div class="status-item">
-                            <span class="label">Отклонение:</span>
-                            <span id="deviation-status" class="value">-</span>
-                        </div>
-                    </div>
-                </section>
+        <h1>🚁 Система стабилизации позиции БАС</h1>
+        
+        <div class="status-panel">
+            <div class="status-card">
+                <h3>Позиция</h3>
+                <div class="value" id="position">-</div>
+                <div class="label">X, Y координаты</div>
             </div>
-
-            <!-- Правая панель: Карта -->
-            <div class="map-panel">
-                <h2>Карта</h2>
-                <div id="map-container" class="map-container">
-                    <canvas id="map-canvas"></canvas>
-                    <div id="map-placeholder" class="map-placeholder">
-                        <p>Загрузите карту для начала работы</p>
-                    </div>
-                </div>
-                <div id="location-info" class="location-info" style="display: none;">
-                    <h3>Информация о местоположении</h3>
-                    <div id="location-details"></div>
-                </div>
+            
+            <div class="status-card">
+                <h3>Смещение</h3>
+                <div class="value" id="offset">-</div>
+                <div class="label">От начальной точки</div>
+            </div>
+            
+            <div class="status-card">
+                <h3>Уверенность</h3>
+                <div class="value" id="confidence">-</div>
+                <div class="label">Трекинг confidence</div>
+            </div>
+            
+            <div class="status-card">
+                <h3>FPS</h3>
+                <div class="value" id="fps">-</div>
+                <div class="label">Частота обработки</div>
+            </div>
+            
+            <div class="status-card">
+                <h3>Стабильность</h3>
+                <div class="value" id="stability">-</div>
+                <div class="label">Статус позиции</div>
+            </div>
+            
+            <div class="status-card">
+                <h3>Расстояние до дома</h3>
+                <div class="value" id="homeDistance">-</div>
+                <div class="label">Метры</div>
             </div>
         </div>
+        
+        <div class="controls">
+            <button onclick="startProcessing()">▶️ Запустить обработку</button>
+            <button onclick="stopProcessing()" class="danger">⏹️ Остановить</button>
+            <button onclick="resetStabilizer()">🔄 Сброс стабилизатора</button>
+            <button onclick="getStatus()">📊 Обновить статус</button>
+        </div>
+        
+        <div class="video-container">
+            <canvas id="videoCanvas"></canvas>
+            <div id="videoPlaceholder" style="color: white; text-align: center;">
+                <p>Камера не подключена</p>
+                <p style="font-size: 12px; margin-top: 10px;">Нажмите "Запустить обработку" для начала</p>
+            </div>
+        </div>
+        
+        <h3 style="margin-bottom: 10px;">Лог событий</h3>
+        <div class="log" id="log"></div>
     </div>
-
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    
+    <script>
+        let processingInterval = null;
+        let canvas = null;
+        let ctx = null;
+        
+        function initCanvas() {
+            canvas = document.getElementById('videoCanvas');
+            ctx = canvas.getContext('2d');
+        }
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        async function getStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.current_position) {
+                    document.getElementById('position').textContent = 
+                        `${data.current_position.x.toFixed(1)}, ${data.current_position.y.toFixed(1)}`;
+                }
+                
+                if (data.stabilization_stats) {
+                    document.getElementById('fps').textContent = 
+                        data.stabilization_stats.avg_fps?.toFixed(1) || '-';
+                }
+                
+                log('Статус обновлен', 'success');
+            } catch (error) {
+                log('Ошибка получения статуса: ' + error, 'error');
+            }
+        }
+        
+        async function processFrame() {
+            try {
+                // Для демонстрации - используем тестовое изображение
+                // В реальности здесь должен быть кадр с камеры
+                const testImage = await createTestFrame();
+                
+                const response = await fetch('/api/process_frame', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        frame: testImage
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateUI(data);
+                    drawVisualization(data);
+                    log('Кадр обработан', 'success');
+                } else {
+                    log('Ошибка обработки: ' + (data.error || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (error) {
+                log('Ошибка отправки кадра: ' + error, 'error');
+            }
+        }
+        
+        function updateUI(data) {
+            if (data.position) {
+                document.getElementById('position').textContent = 
+                    `${data.position.x.toFixed(1)}, ${data.position.y.toFixed(1)}`;
+            }
+            
+            if (data.offset) {
+                document.getElementById('offset').textContent = 
+                    `${data.offset[0].toFixed(2)}, ${data.offset[1].toFixed(2)}`;
+            }
+            
+            if (data.confidence !== undefined) {
+                document.getElementById('confidence').textContent = 
+                    (data.confidence * 100).toFixed(1) + '%';
+            }
+            
+            if (data.fps) {
+                document.getElementById('fps').textContent = data.fps.toFixed(1);
+            }
+            
+            if (data.stability) {
+                const isStable = data.stability.is_stable;
+                document.getElementById('stability').textContent = isStable ? '✅ Стабильно' : '⚠️ Дрифт';
+            }
+            
+            if (data.home_return?.status?.distance_meters !== undefined) {
+                document.getElementById('homeDistance').textContent = 
+                    data.home_return.status.distance_meters.toFixed(1) + ' м';
+            }
+        }
+        
+        function drawVisualization(data) {
+            if (!canvas || !ctx) {
+                initCanvas();
+            }
+            
+            canvas.width = 640;
+            canvas.height = 480;
+            
+            // Очистка
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            
+            // Сетка
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 50) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            
+            // Центр (зеленый круг)
+            ctx.fillStyle = '#00ff00';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 20, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Смещение (красная стрелка)
+            if (data.offset) {
+                const offsetX = data.offset[0];
+                const offsetY = data.offset[1];
+                const endX = centerX + offsetX;
+                const endY = centerY + offsetY;
+                
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+                
+                // Стрелка
+                const angle = Math.atan2(offsetY, offsetX);
+                ctx.beginPath();
+                ctx.moveTo(endX, endY);
+                ctx.lineTo(
+                    endX - 10 * Math.cos(angle - Math.PI / 6),
+                    endY - 10 * Math.sin(angle - Math.PI / 6)
+                );
+                ctx.lineTo(
+                    endX - 10 * Math.cos(angle + Math.PI / 6),
+                    endY - 10 * Math.sin(angle + Math.PI / 6)
+                );
+                ctx.closePath();
+                ctx.fill();
+            }
+            
+            // Текущая позиция (синий круг)
+            if (data.position) {
+                ctx.fillStyle = '#0088ff';
+                ctx.beginPath();
+                ctx.arc(data.position.x, data.position.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        
+        async function createTestFrame() {
+            // Создаем тестовое изображение
+            const testCanvas = document.createElement('canvas');
+            testCanvas.width = 640;
+            testCanvas.height = 480;
+            const testCtx = testCanvas.getContext('2d');
+            
+            // Простой тестовый паттерн
+            testCtx.fillStyle = '#2a2a2a';
+            testCtx.fillRect(0, 0, 640, 480);
+            
+            for (let i = 0; i < 20; i++) {
+                testCtx.fillStyle = `hsl(${i * 18}, 70%, 50%)`;
+                testCtx.fillRect(i * 32, i * 24, 30, 30);
+            }
+            
+            return testCanvas.toDataURL('image/jpeg', 0.8);
+        }
+        
+        function startProcessing() {
+            if (processingInterval) {
+                log('Обработка уже запущена', 'error');
+                return;
+            }
+            
+            initCanvas();
+            document.getElementById('videoPlaceholder').style.display = 'none';
+            log('Обработка запущена', 'success');
+            
+            // Обрабатываем кадры каждые 100мс (10 FPS)
+            processingInterval = setInterval(processFrame, 100);
+        }
+        
+        function stopProcessing() {
+            if (processingInterval) {
+                clearInterval(processingInterval);
+                processingInterval = null;
+                log('Обработка остановлена', 'success');
+            }
+        }
+        
+        async function resetStabilizer() {
+            try {
+                const response = await fetch('/api/reset', {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    log('Стабилизатор сброшен', 'success');
+                } else {
+                    log('Ошибка сброса: ' + data.error, 'error');
+                }
+            } catch (error) {
+                log('Ошибка сброса: ' + error, 'error');
+            }
+        }
+        
+        // Автоматическое обновление статуса
+        setInterval(getStatus, 2000);
+        
+        // Инициализация
+        initCanvas();
+        log('Интерфейс загружен', 'success');
+        getStatus();
+    </script>
 </body>
 </html>
 

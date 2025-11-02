@@ -1,2 +1,0 @@
-# Drone Visual Positioning System
-
