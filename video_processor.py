@@ -1,34 +1,70 @@
 """
-Модуль для обработки видеопотока в реальном времени
+Модуль для обработки видеопотока в реальном времени с использованием Optical Flow
+для стабилизации позиции БАС
 """
 import cv2
 import numpy as np
 import threading
 import time
 from typing import Optional, Callable, Tuple
-from image_matcher import ImageMatcher
-from route_monitor import RouteMonitor
+from stabilization_processor import (
+    PositionStabilizer,
+    DualCameraStabilizer,
+    visualize_stabilization
+)
 
 
 class VideoProcessor:
-    """Класс для обработки видеопотока"""
+    """Класс для обработки видеопотока с стабилизацией позиции"""
     
-    def __init__(self, matcher: ImageMatcher, route_monitor: RouteMonitor):
-        self.matcher = matcher
+    def __init__(
+        self,
+        use_dual_camera: bool = False,
+        primary_method: str = 'lucas_kanade',
+        secondary_method: str = 'farneback',
+        route_monitor=None
+    ):
+        """
+        Args:
+            use_dual_camera: Использовать ли две камеры
+            primary_method: Метод для основной камеры ('lucas_kanade' или 'farneback')
+            secondary_method: Метод для второй камеры
+            route_monitor: Монитор маршрута (опционально)
+        """
+        self.use_dual_camera = use_dual_camera
         self.route_monitor = route_monitor
+        
+        # Инициализация стабилизатора
+        if use_dual_camera:
+            self.stabilizer = DualCameraStabilizer(
+                primary_method=primary_method,
+                secondary_method=secondary_method
+            )
+        else:
+            self.stabilizer = PositionStabilizer(method=primary_method)
+        
         self.is_processing = False
         self.processing_thread = None
         self.frame_callback = None
-        self.process_every_n_frames = 3  # Обрабатываем каждый N-й кадр для производительности
         self.frame_count = 0
         self.last_result = None
         
-    def start_processing(self, video_source, frame_callback: Optional[Callable] = None):
+        # Для статистики
+        self.fps_history = []
+        self.processing_times = []
+        
+    def start_processing(
+        self,
+        primary_video_source,
+        secondary_video_source: Optional = None,
+        frame_callback: Optional[Callable] = None
+    ):
         """
         Начинает обработку видеопотока
         
         Args:
-            video_source: Источник видео (cv2.VideoCapture, файл или веб-камера)
+            primary_video_source: Источник видео основной камеры
+            secondary_video_source: Источник видео второй камеры (если use_dual_camera=True)
             frame_callback: Функция обратного вызова для обработки каждого кадра
         """
         if self.is_processing:
@@ -38,13 +74,23 @@ class VideoProcessor:
         self.frame_callback = frame_callback
         self.frame_count = 0
         
-        if isinstance(video_source, (str, int)):
-            self.cap = cv2.VideoCapture(video_source)
+        # Открываем основную камеру
+        if isinstance(primary_video_source, (str, int)):
+            self.primary_cap = cv2.VideoCapture(primary_video_source)
         else:
-            self.cap = video_source
+            self.primary_cap = primary_video_source
             
-        if not self.cap.isOpened():
-            raise ValueError("Не удалось открыть видеопоток")
+        if not self.primary_cap.isOpened():
+            raise ValueError("Не удалось открыть видеопоток основной камеры")
+        
+        # Открываем вторую камеру, если нужно
+        if self.use_dual_camera and secondary_video_source is not None:
+            if isinstance(secondary_video_source, (str, int)):
+                self.secondary_cap = cv2.VideoCapture(secondary_video_source)
+            else:
+                self.secondary_cap = secondary_video_source
+        else:
+            self.secondary_cap = None
         
         self.processing_thread = threading.Thread(target=self._process_loop, daemon=True)
         self.processing_thread.start()
@@ -52,63 +98,124 @@ class VideoProcessor:
     def stop_processing(self):
         """Останавливает обработку видеопотока"""
         self.is_processing = False
-        if hasattr(self, 'cap'):
-            self.cap.release()
+        
+        if hasattr(self, 'primary_cap'):
+            self.primary_cap.release()
+        if hasattr(self, 'secondary_cap') and self.secondary_cap is not None:
+            self.secondary_cap.release()
+        
         if self.processing_thread:
             self.processing_thread.join(timeout=2.0)
     
     def _process_loop(self):
         """Основной цикл обработки кадров"""
         while self.is_processing:
-            ret, frame = self.cap.read()
-            if not ret:
+            ret1, primary_frame = self.primary_cap.read()
+            if not ret1:
                 break
             
-            self.frame_count += 1
+            # Получаем кадр со второй камеры, если используется
+            secondary_frame = None
+            if self.secondary_cap is not None and self.use_dual_camera:
+                ret2, secondary_frame = self.secondary_cap.read()
+                if not ret2:
+                    secondary_frame = None  # Продолжаем без второй камеры
             
-            # Обрабатываем каждый N-й кадр для производительности
-            if self.frame_count % self.process_every_n_frames == 0:
-                if self.frame_callback:
-                    try:
-                        self.frame_callback(frame.copy(), self.frame_count)
-                    except Exception as e:
-                        print(f"Ошибка обработки кадра: {e}")
+            self.frame_count += 1
+            start_time = time.time()
+            
+            # Обрабатываем кадр
+            try:
+                if self.use_dual_camera:
+                    result = self.stabilizer.update(
+                        primary_frame=primary_frame,
+                        secondary_frame=secondary_frame
+                    )
+                else:
+                    result = self.stabilizer.update(primary_frame)
+                
+                processing_time = time.time() - start_time
+                self.processing_times.append(processing_time)
+                if len(self.processing_times) > 30:
+                    self.processing_times.pop(0)
+                
+                if result:
+                    result['processing_time_ms'] = processing_time * 1000
+                    result['fps'] = 1.0 / processing_time if processing_time > 0 else 0
+                    result['frame_number'] = self.frame_count
+                    
+                    # Добавляем метрики стабильности
+                    if hasattr(self.stabilizer, 'get_stability_metrics'):
+                        stability = self.stabilizer.get_stability_metrics()
+                        result['stability'] = stability
+                    elif hasattr(self.stabilizer, 'primary_stabilizer'):
+                        stability = self.stabilizer.primary_stabilizer.get_stability_metrics()
+                        result['stability'] = stability
+                    
+                    self.last_result = result
+                    
+                    # Вызываем callback, если установлен
+                    if self.frame_callback:
+                        self.frame_callback(result, primary_frame, secondary_frame)
+                        
+            except Exception as e:
+                print(f"Ошибка обработки кадра {self.frame_count}: {e}")
             
             # Небольшая задержка для предотвращения перегрузки CPU
-            time.sleep(0.01)
+            time.sleep(0.001)
     
-    def process_frame(self, frame: np.ndarray, large_map: Optional[np.ndarray] = None) -> Optional[dict]:
+    def process_frame(
+        self,
+        primary_frame: np.ndarray,
+        secondary_frame: Optional[np.ndarray] = None
+    ) -> Optional[dict]:
         """
         Обрабатывает один кадр видео
         
         Args:
-            frame: Кадр видео
-            large_map: Большая карта (если None, используется из route_monitor)
+            primary_frame: Кадр с основной камеры
+            secondary_frame: Кадр со второй камеры (опционально)
             
         Returns:
-            Результат обработки или None
+            Результат обработки с позицией, смещением, скоростью и уверенностью
         """
-        if large_map is None:
-            return None
-        
-        result = self.matcher.find_location(large_map, frame)
-        
-        if result:
-            self.last_result = result
-            position = (result['x'], result['y'])
-            
-            # Проверяем отклонение от маршрута
-            if self.route_monitor.waypoints:
-                deviation_info = self.route_monitor.check_deviation(position)
-                result['deviation'] = deviation_info
+        try:
+            if self.use_dual_camera:
+                result = self.stabilizer.update(
+                    primary_frame=primary_frame,
+                    secondary_frame=secondary_frame
+                )
             else:
-                result['deviation'] = {
-                    'is_on_route': True,
-                    'deviation': 0.0,
-                    'message': 'Маршрут не задан'
-                }
-        
-        return result
+                result = self.stabilizer.update(primary_frame)
+            
+            if result:
+                self.last_result = result
+                
+                # Добавляем метрики стабильности
+                if hasattr(self.stabilizer, 'get_stability_metrics'):
+                    result['stability'] = self.stabilizer.get_stability_metrics()
+                elif hasattr(self.stabilizer, 'primary_stabilizer'):
+                    result['stability'] = self.stabilizer.primary_stabilizer.get_stability_metrics()
+                
+                # Проверяем отклонение от маршрута, если маршрут установлен
+                if self.route_monitor and self.route_monitor.waypoints:
+                    position = result.get('position', [0, 0])
+                    if position:
+                        deviation_info = self.route_monitor.check_deviation(
+                            (position[0], position[1])
+                        )
+                        result['deviation'] = deviation_info
+                else:
+                    result['deviation'] = {
+                        'is_on_route': True,
+                        'deviation': 0.0,
+                        'message': 'Маршрут не задан'
+                    }
+            
+            return result
+        except Exception as e:
+            print(f"Ошибка обработки кадра: {e}")
+            return None
     
     def encode_frame_jpeg(self, frame: np.ndarray, quality: int = 85) -> bytes:
         """
@@ -127,53 +234,58 @@ class VideoProcessor:
             return buffer.tobytes()
         return None
     
-    def draw_result_on_frame(self, frame: np.ndarray, result: dict, 
-                           draw_info: bool = True) -> np.ndarray:
+    def draw_result_on_frame(
+        self,
+        frame: np.ndarray,
+        result: dict,
+        draw_info: bool = True,
+        draw_grid: bool = False
+    ) -> np.ndarray:
         """
         Рисует результат обработки на кадре
         
         Args:
             frame: Кадр видео
-            result: Результат обработки
+            result: Результат обработки стабилизатором
             draw_info: Рисовать ли текстовую информацию
+            draw_grid: Рисовать ли сетку для оценки стабильности
             
         Returns:
             Кадр с нарисованными результатами
         """
-        output_frame = frame.copy()
+        return visualize_stabilization(
+            frame,
+            result,
+            draw_tracks=draw_info,
+            draw_grid=draw_grid
+        )
+    
+    def get_statistics(self) -> dict:
+        """Возвращает статистику обработки"""
+        if not self.processing_times:
+            return {
+                'avg_fps': 0.0,
+                'avg_processing_time_ms': 0.0,
+                'total_frames': self.frame_count
+            }
         
-        if result and 'position' in result:
-            pos = result['position']
-            x, y = int(pos['x']), int(pos['y'])
-            
-            # Рисуем точку местоположения
-            cv2.circle(output_frame, (x, y), 10, (0, 255, 0), -1)
-            cv2.circle(output_frame, (x, y), 20, (0, 255, 0), 2)
-            
-            if draw_info:
-                # Добавляем текстовую информацию
-                info_text = [
-                    f"Confidence: {pos['confidence']:.1f}%",
-                    f"Matches: {pos['matches_count']}",
-                    f"Angle: {pos['angle']:.1f}°"
-                ]
-                
-                y_offset = 30
-                for text in info_text:
-                    cv2.putText(output_frame, text, (10, y_offset),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                    cv2.putText(output_frame, text, (10, y_offset),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
-                    y_offset += 25
+        avg_time = np.mean(self.processing_times)
+        avg_fps = 1.0 / avg_time if avg_time > 0 else 0
         
-        # Рисуем информацию об отклонении
-        if result and 'deviation' in result:
-            deviation = result['deviation']
-            if not deviation.get('is_on_route', True):
-                text = f"Deviation: {deviation['deviation']:.1f}px"
-                color = (0, 0, 255)  # Красный
-                cv2.putText(output_frame, text, (10, output_frame.shape[0] - 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 3)
-        
-        return output_frame
-
+        return {
+            'avg_fps': avg_fps,
+            'avg_processing_time_ms': avg_time * 1000,
+            'min_processing_time_ms': np.min(self.processing_times) * 1000,
+            'max_processing_time_ms': np.max(self.processing_times) * 1000,
+            'total_frames': self.frame_count,
+            'last_result': self.last_result is not None
+        }
+    
+    def reset_stabilizer(self):
+        """Сбрасывает стабилизатор"""
+        if hasattr(self.stabilizer, 'reset'):
+            self.stabilizer.reset()
+        elif hasattr(self.stabilizer, 'primary_stabilizer'):
+            self.stabilizer.primary_stabilizer.reset()
+            if hasattr(self.stabilizer, 'secondary_stabilizer') and self.stabilizer.secondary_stabilizer:
+                self.stabilizer.secondary_stabilizer.reset()

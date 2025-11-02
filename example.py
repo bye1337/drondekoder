@@ -1,151 +1,109 @@
 """
-Example usage of the visual positioning system.
+Простой пример использования системы стабилизации позиции БАС
 """
-
+import cv2
 import numpy as np
-import torch
-from src.models import SiameseNetwork, TripletNetwork
-from src.inference import ImageMatcher, CoordinateEstimator
-from src.route_tracking import RouteManager, RoutePoint, Position, DeviationStatus
-
-
-def example_model_usage():
-    """Example of model usage."""
-    print("=== Model Usage Example ===\n")
-    
-    # Creating model
-    print("1. Creating SiameseNetwork model...")
-    try:
-        model = SiameseNetwork(
-            backbone='resnet50',
-            feature_dim=128,
-            pretrained=True
-        )
-        print(f"   Model created: {model.__class__.__name__}")
-        
-        # Проверка forward pass
-        print("\n2. Testing forward pass...")
-        batch_size = 2
-        img1 = torch.randn(batch_size, 3, 512, 512)
-        img2 = torch.randn(batch_size, 3, 512, 512)
-        
-        with torch.no_grad():
-            similarity = model(img1, img2)
-            print(f"   Input: {batch_size} image pairs 512x512")
-            print(f"   Output similarity: {similarity.shape}")
-        
-        # Извлечение признаков
-        print("\n3. Extracting features...")
-        with torch.no_grad():
-            features = model.extract_features(img1)
-            print(f"   Input: {batch_size} images 512x512")
-            print(f"   Output features: {features.shape}")
-            print(f"   Feature dim: {features.shape[1]}")
-    except Exception as e:
-        print(f"   Error: {e}")
-        print("   Note: This requires pre-trained weights and may not work without Internet")
-
-
-def example_route_tracking():
-    """Example of route tracking."""
-    print("\n\n=== Route Tracking Example ===\n")
-    
-    # Creating route
-    print("1. Creating route with 3 points...")
-    route_points = [
-        RoutePoint(lat=55.7558, lon=37.6173, tolerance=10.0),
-        RoutePoint(lat=55.7658, lon=37.6273, tolerance=15.0),
-        RoutePoint(lat=55.7758, lon=37.6373, tolerance=10.0),
-    ]
-    
-    route_manager = RouteManager(
-        route_points=route_points,
-        max_deviation=50.0,
-        minor_threshold=25.0
-    )
-    print(f"   Route created with {len(route_points)} points")
-    
-    # Testing positions
-    print("\n2. Testing different positions...")
-    
-    test_positions = [
-        (55.7558, 37.6173, "On route"),
-        (55.7650, 37.6280, "Minor deviation"),
-        (55.7700, 37.6300, "Major deviation"),
-        (55.8000, 37.7000, "Off route"),
-    ]
-    
-    for lat, lon, description in test_positions:
-        position = Position(lat=lat, lon=lon, confidence=0.9)
-        alert = route_manager.update_position(position)
-        
-        if alert:
-            status_symbol = {
-                DeviationStatus.ON_ROUTE: "[OK]",
-                DeviationStatus.MINOR_DEVIATION: "[WARNING]",
-                DeviationStatus.MAJOR_DEVIATION: "[ALERT]",
-                DeviationStatus.OFF_ROUTE: "[CRITICAL]"
-            }
-            symbol = status_symbol.get(alert.status, "[?]")
-            print(f"   {description}: {symbol} {alert.deviation_distance:.1f}m - {alert.message}")
-        else:
-            print(f"   {description}: [OK] On route")
-
-
-def example_coordinate_estimation():
-    """Example of coordinate estimation."""
-    print("\n\n=== Coordinate Estimation Example ===\n")
-    
-    # Map metadata
-    map_metadata = {
-        'center_lat': 55.7558,
-        'center_lon': 37.6173,
-        'pixels_per_meter': 1.0,
-        'image_size': (2048, 2048)
-    }
-    
-    # Creating estimator
-    estimator = CoordinateEstimator(map_metadata)
-    
-    # Test matches
-    print("1. Test matches...")
-    matches = [
-        ((1024, 1024), 0.95),  # Center of map
-        ((1000, 1000), 0.90),  # Near center
-        ((1050, 1050), 0.85),  # Near center
-    ]
-    
-    # Estimating position
-    lat, lon, confidence = estimator.estimate_position(matches)
-    
-    print(f"   Average position: ({lat:.6f}, {lon:.6f})")
-    print(f"   Confidence: {confidence:.2%}")
-
+from video_processor import VideoProcessor
 
 def main():
-    """Main function to run examples."""
-    print("Drone Visual Positioning System - Examples\n")
-    print("=" * 70)
+    print("=" * 60)
+    print("Пример: Стабилизация позиции БАС")
+    print("=" * 60)
     
-    try:
-        # Example 1: Model usage
-        example_model_usage()
+    # Создание процессора
+    processor = VideoProcessor(
+        use_dual_camera=False,
+        primary_method='lucas_kanade'
+    )
+    
+    # Открываем камеру
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Ошибка: не удалось открыть камеру")
+        return
+    
+    print("\nОбработка видеопотока...")
+    print("Нажмите 'q' для выхода, 'r' для сброса\n")
+    
+    frame_count = 0
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
         
-        # Example 2: Route tracking
-        example_route_tracking()
+        # Обработка кадра
+        result = processor.process_frame(primary_frame=frame)
         
-        # Example 3: Coordinate estimation
-        example_coordinate_estimation()
+        if result:
+            # Визуализация
+            h, w = frame.shape[:2]
+            center = (w // 2, h // 2)
+            position = result.get('position', center)
+            offset = np.array(result.get('offset', [0, 0]), dtype=int)
+            
+            # Центр
+            cv2.circle(frame, center, 10, (0, 255, 0), 2)
+            
+            # Смещение
+            end_point = (center[0] + offset[0], center[1] + offset[1])
+            cv2.arrowedLine(frame, center, end_point, (0, 0, 255), 3, tipLength=0.3)
+            cv2.circle(frame, tuple(position), 8, (255, 0, 0), -1)
+            
+            # Информация
+            info = [
+                f"Position: ({position[0]}, {position[1]})",
+                f"Offset: ({offset[0]}, {offset[1]})",
+                f"Confidence: {result.get('confidence', 0):.2f}",
+                f"FPS: {result.get('fps', 0):.1f}"
+            ]
+            
+            y = 30
+            for text in info:
+                cv2.putText(frame, text, (10, y),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                y += 25
+            
+            # Стабильность
+            stability = result.get('stability', {})
+            if stability.get('is_stable', False):
+                cv2.putText(frame, "STABLE", (w - 150, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            else:
+                cv2.putText(frame, "DRIFTING", (w - 180, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            
+            if frame_count % 30 == 0:
+                print(f"Кадр {frame_count}: pos={position}, conf={result.get('confidence', 0):.2f}")
         
-        print("\n" + "=" * 70)
-        print("\n[SUCCESS] All examples completed successfully!")
+        cv2.imshow('Stabilization', frame)
         
-    except Exception as e:
-        print(f"\n[ERROR]: {e}")
-        import traceback
-        traceback.print_exc()
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('r'):
+            processor.reset_stabilizer()
+            print("Стабилизатор сброшен")
+        
+        frame_count += 1
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    # Статистика
+    stats = processor.get_statistics()
+    print(f"\nСтатистика:")
+    print(f"  Кадров обработано: {stats['total_frames']}")
+    print(f"  Средний FPS: {stats['avg_fps']:.1f}")
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\nПрервано пользователем")
+    except Exception as e:
+        print(f"\n\nОшибка: {e}")
+        import traceback
+        traceback.print_exc()
 

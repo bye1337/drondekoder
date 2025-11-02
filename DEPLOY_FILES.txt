@@ -1,0 +1,31 @@
+# Список файлов для развертывания на мини ПК
+
+## Обязательные файлы (для работы системы)
+
+stabilization_processor.py      # Основной модуль стабилизации (Optical Flow)
+video_processor.py              # Обработчик видеопотока
+navigation_server.py            # TCP/UDP сервер для связи с дроном
+gps_integration.py             # Интеграция с GPS/ГЛОНАСС
+auto_calibration.py           # Автокалибровка при взлете
+home_return.py                 # Модуль возврата домой
+route_monitor.py               # Мониторинг маршрута
+matek_integration.py          # Интеграция с Matek F405
+drone_navigation.py           # Главный модуль системы (запуск здесь)
+requirements.txt              # Зависимости
+
+## Опциональные файлы (для удобства)
+
+quick_start_matek.py          # Быстрый скрипт запуска
+MINI_PC_SETUP.md              # Инструкция по настройке
+ARDUPILOT_SETUP.md            # Настройка ArduPilot
+ardupilot_params.txt          # Параметры для копирования
+
+## НЕ нужны (только для разработки/отладки)
+
+server.py                     # Веб-сервер (только для отладки)
+example.py                    # Примеры
+test_autonomous.py            # Тесты
+simple_autonomous_test.py     # Тесты
+templates/                    # HTML шаблоны
+*.md (кроме MINI_PC_SETUP.md и ARDUPILOT_SETUP.md)
+
